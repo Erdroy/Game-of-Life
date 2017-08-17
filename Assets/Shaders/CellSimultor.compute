@@ -1,0 +1,94 @@
+﻿// Game_of_Life © 2016-2017 Damian 'Erdroy' Korczowski
+
+#pragma kernel Simulate
+#pragma kernel Update
+
+#define BlockSize 16
+#define TextureSize 8192
+#define UpdateBufferSize 512
+
+// cell update buffer
+Buffer<uint3> UpdateBuffer;
+
+Texture2D<float> Input;
+RWTexture2D<float> Output;
+
+int CountNeighbors(uint2 p) 
+{
+	int3 pos = int3(p, 0);
+
+	// if we are on border, we cannot get all cells, just return 0 to limit the space
+	if (pos.x == 0 || pos.y == 0 || pos.x == TextureSize || pos.y == TextureSize)
+		return 0;
+
+	int aliveCells = 0;
+
+	if (Input.Load(pos + int3( 1,  0, 0)) > 0.1f)
+		aliveCells++;
+	if (Input.Load(pos + int3( 0,  1, 0)) > 0.1f)
+		aliveCells++;
+	if (Input.Load(pos + int3( 1,  1, 0)) > 0.1f)
+		aliveCells++;
+	if (Input.Load(pos + int3(-1,  0, 0)) > 0.1f)
+		aliveCells++;
+	if (Input.Load(pos + int3( 0, -1, 0)) > 0.1f)
+		aliveCells++;
+	if (Input.Load(pos + int3(-1, -1, 0)) > 0.1f)
+		aliveCells++;
+	if (Input.Load(pos + int3(-1,  1, 0)) > 0.1f)
+		aliveCells++;
+	if (Input.Load(pos + int3( 1, -1, 0)) > 0.1f)
+		aliveCells++;
+
+	return aliveCells;
+}
+
+void SimulateConway(int2 pos, float isAlive, int aliveNeighbors)
+{
+	// set cell
+	if (isAlive > 0.1f)
+	{
+		if (aliveNeighbors != 2 && aliveNeighbors != 3)
+		{
+			Output[pos] = 0.0f;
+		}
+	}
+	else if (aliveNeighbors == 3)
+	{
+		Output[pos] = 1.0f; // we could use isAlive to add some unique colors, then set those in CellShader
+	}
+}
+
+[numthreads(BlockSize, BlockSize, 1)]
+void Simulate(uint3 id : SV_DispatchThreadID)
+{
+	// simulates cells lifecycle
+
+	// get alive neighbor count
+	int aliveNeighbors = CountNeighbors(id.xy);
+	float alive = Input.Load(id);
+
+	// just copy the cell to the output
+	Output[id.xy] = alive;
+
+	// simulate conway rules
+	SimulateConway(id.xy, alive, aliveNeighbors);
+}
+
+[numthreads(1, 1, 1)]
+void Update(uint3 id : SV_DispatchThreadID)
+{
+	// updates cells placing/removing
+
+	for (int i = 0; i < UpdateBufferSize; i++)
+	{
+		uint3 value = UpdateBuffer[i];
+		
+		if (value.x > 0) // if this buffer was changed
+		{
+			Output[(uint2)value.xy] = (float)value.z; // change the desc cell
+		}
+		else 
+			return; // we can use return safely here, because this is ran only one on GPU
+	}
+}
